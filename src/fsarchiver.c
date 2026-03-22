@@ -20,6 +20,7 @@
 #endif
 
 #include <unistd.h>
+#include <termios.h>
 #include <string.h>
 #include <signal.h>
 #include <getopt.h>
@@ -161,6 +162,34 @@ static struct option const long_options[] =
     {NULL, 0, NULL, 0}
 };
 
+void hide_terminal_input() {
+    struct termios tty;
+    tcgetattr(STDIN_FILENO, &tty);
+    tty.c_lflag &= ~ECHO; // Disable echo
+    tcsetattr(STDIN_FILENO, TCSANOW, &tty);
+}
+
+void show_terminal_input() {
+    struct termios tty;
+    tcgetattr(STDIN_FILENO, &tty);
+    tty.c_lflag |= ECHO; // Enable echo
+    tcsetattr(STDIN_FILENO, TCSANOW, &tty);
+}
+
+void get_password(char *password, size_t size) {
+    printf("Enter password: ");
+    hide_terminal_input();
+    fgets(password, size, stdin);
+    show_terminal_input();
+
+    // Trim the newline character if present
+    size_t len = strlen(password);
+    if (len > 0 && password[len - 1] == '\n') {
+        password[len - 1] = '\0';  // Replace the newline with null terminator
+    }
+    printf("\n");
+}
+
 int process_cmdline(int argc, char **argv)
 {
     char *partition[FSA_MAX_FSPERARCH];
@@ -301,7 +330,7 @@ int process_cmdline(int argc, char **argv)
             case 'c': // encryption
                 g_options.encryptalgo=ENCRYPT_BLOWFISH;
                 if ((strlen(optarg)<FSA_MIN_PASSLEN || strlen(optarg)>FSA_MAX_PASSLEN) && strcmp(optarg, "-")!=0)
-                {   errprintf("the password lenght is incorrect, it must between %d and %d chars, or \"-\" for interactive password prompt.\n", FSA_MIN_PASSLEN, FSA_MAX_PASSLEN);
+                {   errprintf("the password length is incorrect, it must between %d and %d chars, or \"-\" for interactive password prompt.\n", FSA_MIN_PASSLEN, FSA_MAX_PASSLEN);
                     usage(progname, false);
                     return -1;
                 }
@@ -391,22 +420,24 @@ int process_cmdline(int argc, char **argv)
     if (strcmp((char*)g_options.encryptpass, "-")==0)
     {
         int passconfirm;
-        char *passtmp=NULL;
+        char passtmp[FSA_MAX_PASSLEN];
 
-        passconfirm = (cmd==OPER_SAVEFS || cmd==OPER_SAVEDIR);
-        if ((passtmp=getpass("Enter password: "))==NULL)
-        {   errprintf("failed to get interactive password from the console\n");
-            return -1;
-        }
-        if (strlen(passtmp)<FSA_MIN_PASSLEN || strlen(passtmp)>FSA_MAX_PASSLEN)
-        {   errprintf("the password lenght is incorrect, it must between %d and %d chars\n", FSA_MIN_PASSLEN, FSA_MAX_PASSLEN);
+        // passconfirm = (cmd==OPER_SAVEFS || cmd==OPER_SAVEDIR);
+        passconfirm = false;
+        get_password(passtmp,FSA_MAX_PASSLEN);
+        size_t len = strlen(passtmp);
+        if (len<FSA_MIN_PASSLEN || len>FSA_MAX_PASSLEN)
+        {   errprintf("the password length is incorrect, it must between %d and %d chars\n", FSA_MIN_PASSLEN, FSA_MAX_PASSLEN);
             return -1;
         }
         snprintf((char*)g_options.encryptpass, FSA_MAX_PASSLEN, "%s", passtmp);
 
         if (passconfirm==true)
         {
-            if ((passtmp=getpass("Confirm password: "))==NULL)
+            printf("Confirm password\n");
+            get_password(passtmp,FSA_MAX_PASSLEN);
+            len = strlen(passtmp);
+            if (len<FSA_MIN_PASSLEN || len>FSA_MAX_PASSLEN)
             {   errprintf("failed to get interactive password from the console\n");
                 return -1;
             }
